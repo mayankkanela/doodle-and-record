@@ -1,3 +1,7 @@
 <resources>
     <string name="app_name">doodle and record</string>
+    <string name="hint">Title Here</string>
+    <string name="upload">upload</string>
+    <string name="textOff">start</string>
+    <string name="textOn">end</string>
 </resources>
