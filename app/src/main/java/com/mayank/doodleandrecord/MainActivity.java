@@ -1,82 +1,117 @@
 package com.mayank.doodleandrecord;
 
-import androidx.annotation.Nullable;
-import androidx.appcompat.app.AppCompatActivity;
-import androidx.constraintlayout.widget.ConstraintLayout;
-
-import android.content.Context;
+import android.app.ProgressDialog;
 import android.content.Intent;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.media.projection.MediaProjectionManager;
+import android.os.AsyncTask;
 import android.os.Bundle;
+import android.os.Environment;
 import android.view.View;
-import android.widget.CompoundButton;
+import android.widget.Button;
 import android.widget.LinearLayout;
-import android.widget.ToggleButton;
 
-import com.hbisoft.hbrecorder.HBRecorder;
-import com.hbisoft.hbrecorder.HBRecorderListener;
+import androidx.appcompat.app.AppCompatActivity;
 
-public class MainActivity extends AppCompatActivity implements HBRecorderListener {
-    private static final int SCREEN_RECORD_REQUEST_CODE = 0;
-    private HBRecorder hbRecorder;
+import org.jcodec.api.android.AndroidSequenceEncoder;
+import org.jcodec.common.io.NIOUtils;
+import org.jcodec.common.io.SeekableByteChannel;
+import org.jcodec.common.model.Rational;
 
+import java.io.File;
+import java.io.FileNotFoundException;
+import java.io.IOException;
+import java.util.Date;
+
+public class MainActivity extends AppCompatActivity {
+
+    private static final int WRITE_EXTERNAL_REQUEST_CODE = 1;
+    private MediaProjectionManager mediaProjectionManager;
+    private int i = 0;
+    private PaintView paintView;
+    private  String name;
+    private String path;
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
-        PaintView paintView = new PaintView(getApplicationContext());
+        paintView = new PaintView(getApplicationContext());
         LinearLayout linearLayout = findViewById(R.id.ll_paint_view);
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.MATCH_PARENT);
         linearLayout.addView(paintView, params);
-        hbRecorder = new HBRecorder(getApplicationContext(), this);
-        hbRecorder.isAudioEnabled(false);
         intListener();
+
     }
 
     private void intListener() {
-        ToggleButton toggleButton = findViewById(R.id.tb_next);
-        toggleButton.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
+        Button preview = findViewById(R.id.bt_next);
+        preview.setOnClickListener(new View.OnClickListener() {
             @Override
-            public void onCheckedChanged(CompoundButton compoundButton, boolean b) {
-                if (b) {
-                    startScreenRecording();
-                } else {
-                    hbRecorder.stopScreenRecording();
-                    Intent intent = new Intent(getApplicationContext(), UploadAndPreviewActivity.class);
-                    intent.putExtra("PATH", hbRecorder.getFilePath());
-                    intent.putExtra("NAME", hbRecorder.getFileName());
-                    startActivity(intent);
-                }
+            public void onClick(View view) {
+                ProgressDialog progressDialog = new ProgressDialog(MainActivity.this);
+                progressDialog.setMessage("Encoding video...");
+                progressDialog.setCancelable(false);
+                progressDialog.show();
+                int n = paintView.getTotalFrames();
+                encodeImages(n, progressDialog);
+
             }
         });
+
     }
 
-    private void startScreenRecording() {
-        MediaProjectionManager mediaProjectionManager = (MediaProjectionManager) getSystemService(Context.MEDIA_PROJECTION_SERVICE);
-        Intent permissionIntent = mediaProjectionManager != null ? mediaProjectionManager.createScreenCaptureIntent() : null;
-        startActivityForResult(permissionIntent, SCREEN_RECORD_REQUEST_CODE);
-    }
+    private void encodeImages(final int n, final ProgressDialog progressDialog) {
+        final SeekableByteChannel[] out = {null};
+        new AsyncTask<Void, Void, Void>() {
+            @Override
+            protected Void doInBackground(Void... voids) {
+                try {
+                    name =  new Date() +"_Output.mp4";
+                    path = Environment.getExternalStorageDirectory().toString() + File.separator + name;
+                    out[0] = NIOUtils.writableFileChannel(path);
+                    // for Android use: AndroidSequenceEncoder
+                    AndroidSequenceEncoder encoder = new AndroidSequenceEncoder(out[0], Rational.R(12, 1));
+                    for (int i = 1; i < n; i++) {
+                        // Generate the image, for Android use Bitmap
+                        Bitmap image = BitmapFactory.decodeFile(Environment.getExternalStorageDirectory().toString() + File.separator + "Folder" + File.separator + i + ".jpg");
 
-    @Override
-    protected void onActivityResult(int requestCode, int resultCode, @Nullable Intent data) {
-        super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode == SCREEN_RECORD_REQUEST_CODE) {
-            if (resultCode == RESULT_OK) {
-                //Start screen recording
-                hbRecorder.startScreenRecording(data, resultCode, this);
+                        Bitmap m = image.copy(Bitmap.Config.ARGB_8888, true);
+                        if (image.getHeight() % 2 != 0)
+                            m.setHeight(image.getHeight() - 1);
+                        // Encode the image
+                        if (image != null)
+                            encoder.encodeImage(m);
+                    }
+                    // Finalize the encoding, i.e. clear the buffers, write the header, etc.
+                    encoder.finish();
+                    initUploadActivity(path, name);
+                    progressDialog.dismiss();
+                } catch (FileNotFoundException e) {
+                    e.printStackTrace();
+                } catch (IOException e) {
+                    e.printStackTrace();
+                } finally {
+                    paintView.clearFiles();
+                    NIOUtils.closeQuietly(out[0]);
+                }
 
+                return null;
             }
-        }
-    }
+        }.execute();
 
-    @Override
-    public void HBRecorderOnComplete() {
 
     }
 
-    @Override
-    public void HBRecorderOnError(int errorCode, String reason) {
+    private void initUploadActivity(String path, String name) {
+        Intent intent = new Intent(MainActivity.this,UploadAndPreviewActivity.class);
+        intent.putExtra("PATH", path);
+        intent.putExtra("NAME", name);
+        startActivity(intent);
+        MainActivity.this.finish();
 
     }
+
+
 }
